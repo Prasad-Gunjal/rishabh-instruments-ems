@@ -93,6 +93,17 @@ const materialSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  approvalStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
+  },
+  approvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  approvedAt: Date,
+  rejectionReason: String,
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

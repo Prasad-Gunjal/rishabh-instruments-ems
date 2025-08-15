@@ -159,6 +159,19 @@ class ApiService {
     return this.api.get('/materials/alerts/low-stock');
   }
 
+  // Material approval endpoints
+  approveMaterial(id, approvalData = {}) {
+    return this.api.patch(`/materials/${id}/approve`, approvalData);
+  }
+
+  rejectMaterial(id, rejectionData) {
+    return this.api.patch(`/materials/${id}/reject`, rejectionData);
+  }
+
+  getPendingMaterials() {
+    return this.api.get('/materials/admin/pending');
+  }
+
   // Projects endpoints
   getProjects(params = {}) {
     return this.api.get('/projects', { params });

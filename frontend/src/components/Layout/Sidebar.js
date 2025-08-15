@@ -30,7 +30,7 @@ const navigationItems = [
     path: '/dashboard',
   },
   {
-    text: 'Materials',
+  text: 'Material Management',
     icon: <InventoryIcon />,
     path: '/materials',
   },
