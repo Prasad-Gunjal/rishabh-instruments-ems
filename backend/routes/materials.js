@@ -76,12 +76,20 @@ router.get('/:id', auth, async (req, res) => {
 });
 
 // Create new material
-router.post('/', auth, authorize('admin', 'manager'), async (req, res) => {
+router.post('/', auth, authorize('admin', 'manager', 'operator'), async (req, res) => {
   try {
     const materialData = {
       ...req.body,
-      createdBy: req.user._id
+      createdBy: req.user._id,
+      // Set approval status based on user role
+      approvalStatus: req.user.role === 'admin' ? 'approved' : 'pending'
     };
+
+    // If admin created, also set approval details
+    if (req.user.role === 'admin') {
+      materialData.approvedBy = req.user._id;
+      materialData.approvedAt = new Date();
+    }
 
     // Auto-calculate max stock level if not provided
     if (!materialData.maxStockLevel) {
@@ -92,10 +100,13 @@ router.post('/', auth, authorize('admin', 'manager'), async (req, res) => {
     await material.save();
 
     const populatedMaterial = await Material.findById(material._id)
-      .populate('createdBy', 'name email');
+      .populate('createdBy', 'name email')
+      .populate('approvedBy', 'name email');
 
     res.status(201).json({
-      message: 'Material created successfully',
+      message: req.user.role === 'admin' 
+        ? 'Material created and approved successfully' 
+        : 'Material created successfully and submitted for approval',
       material: populatedMaterial
     });
   } catch (error) {
@@ -241,6 +252,7 @@ router.get('/alerts/low-stock', auth, async (req, res) => {
       {
         $match: {
           isActive: true,
+          approvalStatus: 'approved', // Only show approved materials
           $expr: { $lte: ['$quantityAvailable', '$minStockLevel'] }
         }
       },
@@ -273,6 +285,106 @@ router.get('/alerts/low-stock', auth, async (req, res) => {
     console.error('Get low stock error:', error);
     res.status(500).json({ 
       message: 'Error fetching low stock materials', 
+      error: error.message 
+    });
+  }
+});
+
+// Approve material (Admin only)
+router.patch('/:id/approve', auth, authorize('admin'), async (req, res) => {
+  try {
+    const material = await Material.findById(req.params.id);
+    
+    if (!material) {
+      return res.status(404).json({ message: 'Material not found' });
+    }
+
+    if (material.approvalStatus === 'approved') {
+      return res.status(400).json({ message: 'Material is already approved' });
+    }
+
+    material.approvalStatus = 'approved';
+    material.approvedBy = req.user._id;
+    material.approvedAt = new Date();
+    material.updatedBy = req.user._id;
+    material.rejectionReason = undefined; // Clear any previous rejection reason
+
+    await material.save();
+
+    const populatedMaterial = await Material.findById(material._id)
+      .populate('createdBy', 'name email')
+      .populate('approvedBy', 'name email');
+
+    res.json({
+      message: 'Material approved successfully',
+      material: populatedMaterial
+    });
+  } catch (error) {
+    console.error('Approve material error:', error);
+    res.status(500).json({ 
+      message: 'Error approving material', 
+      error: error.message 
+    });
+  }
+});
+
+// Reject material (Admin only)
+router.patch('/:id/reject', auth, authorize('admin'), async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const material = await Material.findById(req.params.id);
+    
+    if (!material) {
+      return res.status(404).json({ message: 'Material not found' });
+    }
+
+    if (material.approvalStatus === 'rejected') {
+      return res.status(400).json({ message: 'Material is already rejected' });
+    }
+
+    material.approvalStatus = 'rejected';
+    material.approvedBy = req.user._id;
+    material.approvedAt = new Date();
+    material.updatedBy = req.user._id;
+    material.rejectionReason = reason || 'No reason provided';
+
+    await material.save();
+
+    const populatedMaterial = await Material.findById(material._id)
+      .populate('createdBy', 'name email')
+      .populate('approvedBy', 'name email');
+
+    res.json({
+      message: 'Material rejected successfully',
+      material: populatedMaterial
+    });
+  } catch (error) {
+    console.error('Reject material error:', error);
+    res.status(500).json({ 
+      message: 'Error rejecting material', 
+      error: error.message 
+    });
+  }
+});
+
+// Get pending materials for approval (Admin only)
+router.get('/admin/pending', auth, authorize('admin'), async (req, res) => {
+  try {
+    const pendingMaterials = await Material.find({ 
+      approvalStatus: 'pending',
+      isActive: true 
+    })
+    .populate('createdBy', 'name email department')
+    .sort({ createdAt: -1 });
+
+    res.json({
+      materials: pendingMaterials,
+      count: pendingMaterials.length
+    });
+  } catch (error) {
+    console.error('Get pending materials error:', error);
+    res.status(500).json({ 
+      message: 'Error fetching pending materials', 
       error: error.message 
     });
   }

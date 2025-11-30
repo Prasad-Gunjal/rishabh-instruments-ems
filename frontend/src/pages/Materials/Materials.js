@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { toast } from 'react-toastify';
 import {
   Box,
   Typography,
@@ -11,7 +12,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
   Chip,
   IconButton,
   Dialog,
@@ -23,6 +23,7 @@ import {
   Grid,
   Alert,
   CircularProgress,
+  InputAdornment,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -30,19 +31,35 @@ import {
   Delete as DeleteIcon,
   Visibility as ViewIcon,
   Warning as WarningIcon,
+  Search as SearchIcon,
+  Download as DownloadIcon,
+  CheckCircle as ApproveIcon,
+  Cancel as RejectIcon,
+  Pending as PendingIcon,
+  Check as CheckIcon,
+  Close as CloseIcon,
 } from '@mui/icons-material';
 
 import apiService from '../../services/apiService';
+import { useAuth } from '../../context/AuthContext';
 
-const Materials = () => {
+const MaterialManagement = () => {
+  const { user } = useAuth();
   const [materials, setMaterials] = useState([]);
+  const [filteredMaterials, setFilteredMaterials] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [dialogError, setDialogError] = useState('');
   const [openDialog, setOpenDialog] = useState(false);
   const [openViewDialog, setOpenViewDialog] = useState(false);
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
+  const [openApprovalDialog, setOpenApprovalDialog] = useState(false);
   const [selectedMaterial, setSelectedMaterial] = useState(null);
   const [materialToDelete, setMaterialToDelete] = useState(null);
+  const [materialForApproval, setMaterialForApproval] = useState(null);
+  const [approvalAction, setApprovalAction] = useState('');
+  const [rejectionReason, setRejectionReason] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -65,6 +82,40 @@ const Materials = () => {
     specifications: {},
   });
 
+  // Handle approval/rejection actions
+  const handleApprovalStatusChange = async (materialId, newStatus, reason = '') => {
+    try {
+      if (newStatus === 'approved') {
+        await apiService.approveMaterial(materialId);
+        toast.success('Material approved successfully');
+      } else if (newStatus === 'rejected') {
+        if (!reason.trim()) {
+          toast.error('Please provide a rejection reason');
+          return;
+        }
+        await apiService.rejectMaterial(materialId, { reason });
+        toast.success('Material rejected successfully');
+      }
+      
+      // Refresh materials list
+      await fetchMaterials();
+      
+      // Close any open dialogs and reset state
+      setOpenApprovalDialog(false);
+      setOpenViewDialog(false);
+      setOpenDialog(false);
+      setMaterialForApproval(null);
+      setApprovalAction('');
+      setRejectionReason('');
+      setSelectedMaterial(null);
+      
+    } catch (error) {
+      console.error('Error updating approval status:', error);
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to update approval status';
+      toast.error(errorMessage);
+    }
+  };
+
   const fetchMaterials = async () => {
     try {
       setLoading(true);
@@ -81,6 +132,20 @@ const Materials = () => {
   useEffect(() => {
     fetchMaterials();
   }, []);
+
+  // Filter materials based on search term
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      setFilteredMaterials(materials);
+    } else {
+      const filtered = materials.filter(material =>
+        material.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        material.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        material.category?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+      setFilteredMaterials(filtered);
+    }
+  }, [materials, searchTerm]);
 
   const handleAddMaterial = () => {
     setSelectedMaterial(null);
@@ -161,8 +226,12 @@ const Materials = () => {
     setOpenDialog(false);
     setOpenViewDialog(false);
     setOpenDeleteDialog(false);
+    setOpenApprovalDialog(false);
     setSelectedMaterial(null);
     setMaterialToDelete(null);
+    setMaterialForApproval(null);
+    setApprovalAction('');
+    setDialogError('');
     setFormData({
       name: '',
       description: '',
@@ -186,15 +255,74 @@ const Materials = () => {
     });
   };
 
+  // Approval Functions
+  const handleApprovalAction = (material, action) => {
+    setMaterialForApproval(material);
+    setApprovalAction(action);
+    setRejectionReason(''); // Reset rejection reason for new action
+    setOpenApprovalDialog(true);
+  };
+
+  const confirmApprovalAction = async () => {
+    if (materialForApproval) {
+      const status = approvalAction === 'approve' ? 'approved' : 'rejected';
+      await handleApprovalStatusChange(
+        materialForApproval._id, 
+        status, 
+        rejectionReason
+      );
+      
+      // Close all dialogs and reset state
+      setOpenApprovalDialog(false);
+      setOpenViewDialog(false);
+      setOpenDialog(false);
+      setMaterialForApproval(null);
+      setApprovalAction('');
+      setRejectionReason('');
+      setSelectedMaterial(null);
+    }
+  };
+
+  const getApprovalStatus = (status) => {
+    switch (status) {
+      case 'approved':
+        return { label: 'APPROVED', color: 'success', icon: <ApproveIcon /> };
+      case 'rejected':
+        return { label: 'REJECTED', color: 'error', icon: <RejectIcon /> };
+      case 'pending':
+      default:
+        return { label: 'PENDING', color: 'warning', icon: <PendingIcon /> };
+    }
+  };
+
   const handleSubmit = async () => {
     try {
       console.log('Form submission started', formData);
+      setDialogError(''); // Clear any previous dialog errors
       
       // Validation for required fields
       if (!formData.name.trim()) {
         setError('Material name is required');
         return;
       }
+
+      // Check for duplicate material name and description
+      const duplicateMaterial = materials.find(material => {
+        // Skip checking against the same material when editing
+        if (selectedMaterial && material._id === selectedMaterial._id) {
+          return false;
+        }
+        return material.name.toLowerCase().trim() === formData.name.toLowerCase().trim() &&
+               material.description?.toLowerCase().trim() === formData.description?.toLowerCase().trim();
+      });
+
+      if (duplicateMaterial) {
+        const errorMessage = 'A material with the same name and description already exists';
+        setDialogError(errorMessage);
+        toast.error(errorMessage);
+        return;
+      }
+
       if (!formData.category) {
         setError('Category is required');
         return;
@@ -248,6 +376,8 @@ const Materials = () => {
         qualityGrade: formData.qualityGrade,
         expiryDate: formData.expiryDate || null,
         specifications: formData.specifications,
+        // Set approval status based on user role
+        approvalStatus: user?.role === 'admin' ? 'approved' : 'pending',
       };
 
       console.log('Submit data prepared:', submitData);
@@ -262,6 +392,13 @@ const Materials = () => {
         const response = await apiService.createMaterial(submitData);
         console.log('Create response:', response);
         setError('');
+        
+        // Show appropriate success message based on user role
+        if (user?.role === 'admin') {
+          toast.success('Material created and approved successfully');
+        } else {
+          toast.success('Material created successfully. Pending admin approval.');
+        }
       }
       
       console.log('Fetching updated materials list');
@@ -279,6 +416,85 @@ const Materials = () => {
       ...prev,
       [field]: value
     }));
+  };
+
+  // Export materials to CSV
+  const handleExportMaterials = () => {
+    try {
+      // Define CSV headers
+      const headers = [
+        'Serial Number',
+        'Material Name',
+        'Description',
+        'Category',
+        'Sub Category',
+        'Unit',
+        'Quantity Available',
+        'Min Stock Level',
+        'Max Stock Level',
+        'Unit Price (₹)',
+        'Total Value (₹)',
+        'Supplier Name',
+        'Supplier Contact',
+        'Supplier Email',
+        'Supplier Address',
+        'Warehouse',
+        'Rack',
+        'Bin',
+        'Stock Status',
+        'Created Date',
+        'Last Updated'
+      ];
+
+      // Convert materials data to CSV rows
+      const csvData = filteredMaterials.map(material => [
+        material.serialNumber || 'N/A',
+        material.name || 'N/A',
+        material.description || 'N/A',
+        material.category || 'N/A',
+        material.subCategory || 'N/A',
+        material.unit || 'N/A',
+        material.quantityAvailable || 0,
+        material.minStockLevel || 0,
+        material.maxStockLevel || 0,
+        material.unitPrice || 0,
+        (material.quantityAvailable * material.unitPrice) || 0,
+        material.supplier?.name || 'N/A',
+        material.supplier?.contact || 'N/A',
+        material.supplier?.email || 'N/A',
+        material.supplier?.address || 'N/A',
+        material.location?.warehouse || 'N/A',
+        material.location?.rack || 'N/A',
+        material.location?.bin || 'N/A',
+        getStockStatus(material).label || 'N/A',
+        material.createdAt ? new Date(material.createdAt).toLocaleDateString() : 'N/A',
+        material.updatedAt ? new Date(material.updatedAt).toLocaleDateString() : 'N/A'
+      ]);
+
+      // Combine headers and data
+      const csvContent = [headers, ...csvData]
+        .map(row => row.map(cell => `"${cell}"`).join(','))
+        .join('\n');
+
+      // Create and download the file
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      
+      if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `materials_export_${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+
+      toast.success(`Successfully exported ${filteredMaterials.length} materials to CSV`);
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.error('Failed to export materials');
+    }
   };
 
   const getStockStatus = (material) => {
@@ -311,14 +527,24 @@ const Materials = () => {
             Manage inventory, track stock levels, and monitor material usage
           </Typography>
         </Box>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={handleAddMaterial}
-          size="large"
-        >
-          Add Material
-        </Button>
+        <Box display="flex" gap={2}>
+          <Button
+            variant="outlined"
+            startIcon={<DownloadIcon />}
+            onClick={handleExportMaterials}
+            size="large"
+          >
+            Export
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={handleAddMaterial}
+            size="large"
+          >
+            Add Material
+          </Button>
+        </Box>
       </Box>
 
       {error && (
@@ -326,6 +552,25 @@ const Materials = () => {
           {error}
         </Alert>
       )}
+
+      {/* Search Bar */}
+      <Box mb={3}>
+        <TextField
+          fullWidth
+          variant="outlined"
+          placeholder="Search materials by name, description, or category..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon color="action" />
+              </InputAdornment>
+            ),
+          }}
+          sx={{ maxWidth: 600 }}
+        />
+      </Box>
 
       {/* Summary Cards */}
       <Grid container spacing={3} mb={4}>
@@ -336,7 +581,7 @@ const Materials = () => {
                 {materials.length}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Total Materials
+                No. of Items
               </Typography>
             </CardContent>
           </Card>
@@ -360,7 +605,7 @@ const Materials = () => {
                 {materials.reduce((sum, m) => sum + (m.quantityAvailable * m.unitPrice), 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' })}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Total Inventory Value
+                Total Cost
               </Typography>
             </CardContent>
           </Card>
@@ -388,17 +633,17 @@ const Materials = () => {
                 <TableRow>
                   <TableCell>Serial Number</TableCell>
                   <TableCell>Material Name</TableCell>
-                  <TableCell>Category</TableCell>
                   <TableCell>Quantity Available</TableCell>
                   <TableCell>Unit Price</TableCell>
                   <TableCell>Supplier</TableCell>
                   <TableCell>Location</TableCell>
                   <TableCell>Stock Status</TableCell>
+                  <TableCell>Approval Status</TableCell>
                   <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {materials.map((material) => {
+                {filteredMaterials.map((material) => {
                   const stockStatus = getStockStatus(material);
                   return (
                     <TableRow key={material._id}>
@@ -418,16 +663,35 @@ const Materials = () => {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Chip
-                          label={material.category}
-                          size="small"
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" fontWeight={600}>
-                          {material.quantityAvailable} {material.unit}
-                        </Typography>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <Typography variant="body2" fontWeight={600}>
+                            {material.quantityAvailable} {material.unit}
+                          </Typography>
+                          {material.quantityAvailable <= material.minStockLevel && (
+                            <Chip
+                              label="LOW"
+                              size="small"
+                              color="error"
+                              sx={{ fontSize: '0.6rem', height: '18px' }}
+                            />
+                          )}
+                          {material.quantityAvailable <= material.minStockLevel * 2 && material.quantityAvailable > material.minStockLevel && (
+                            <Chip
+                              label="MEDIUM"
+                              size="small"
+                              color="warning"
+                              sx={{ fontSize: '0.6rem', height: '18px' }}
+                            />
+                          )}
+                          {material.quantityAvailable > material.minStockLevel * 2 && (
+                            <Chip
+                              label="GOOD"
+                              size="small"
+                              color="success"
+                              sx={{ fontSize: '0.6rem', height: '18px' }}
+                            />
+                          )}
+                        </Box>
                         <Typography variant="caption" color="text.secondary" display="block">
                           Min: {material.minStockLevel} | Max: {material.maxStockLevel}
                         </Typography>
@@ -446,7 +710,12 @@ const Materials = () => {
                         </Typography>
                         {material.supplier?.contact && (
                           <Typography variant="caption" color="text.secondary" display="block">
-                            {material.supplier.contact}
+                            📞 {material.supplier.contact}
+                          </Typography>
+                        )}
+                        {material.supplier?.email && (
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            ✉️ {material.supplier.email}
                           </Typography>
                         )}
                       </TableCell>
@@ -471,15 +740,33 @@ const Materials = () => {
                         />
                       </TableCell>
                       <TableCell>
-                        <IconButton size="small" onClick={() => handleViewMaterial(material)}>
-                          <ViewIcon />
-                        </IconButton>
-                        <IconButton size="small" onClick={() => handleEditMaterial(material)}>
-                          <EditIcon />
-                        </IconButton>
-                        <IconButton size="small" color="error" onClick={() => handleDeleteMaterial(material)}>
-                          <DeleteIcon />
-                        </IconButton>
+                        {(() => {
+                          const approvalStatus = getApprovalStatus(material.approvalStatus);
+                          return (
+                            <Chip
+                              label={approvalStatus.label}
+                              color={approvalStatus.color}
+                              size="small"
+                            />
+                          );
+                        })()}
+                      </TableCell>
+                      <TableCell>
+                        <Box display="flex" gap={0.5}>
+                          <IconButton size="small" onClick={() => handleViewMaterial(material)}>
+                            <ViewIcon />
+                          </IconButton>
+                          {(user?.role === 'admin' || material.approvalStatus === 'approved') && (
+                            <IconButton size="small" onClick={() => handleEditMaterial(material)}>
+                              <EditIcon />
+                            </IconButton>
+                          )}
+                          {user?.role === 'admin' && (
+                            <IconButton size="small" color="error" onClick={() => handleDeleteMaterial(material)}>
+                              <DeleteIcon />
+                            </IconButton>
+                          )}
+                        </Box>
                       </TableCell>
                     </TableRow>
                   );
@@ -496,6 +783,11 @@ const Materials = () => {
           {selectedMaterial ? 'Edit Material' : 'Add New Material'}
         </DialogTitle>
         <DialogContent>
+          {dialogError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {dialogError}
+            </Alert>
+          )}
           <Grid container spacing={3} sx={{ mt: 1 }}>
             {/* Basic Information */}
             <Grid item xs={12}>
@@ -768,6 +1060,128 @@ const Materials = () => {
                 helperText="Optional - Bin location"
               />
             </Grid>
+
+            {/* Admin Approval Control - Simple Buttons Only */}
+            {user?.role === 'admin' && selectedMaterial && (
+              <>
+                <Grid item xs={12}>
+                  <Typography variant="h6" color="primary" gutterBottom sx={{ mt: 2 }}>
+                    Approval Management
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={12}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Current Status: <strong>{selectedMaterial.approvalStatus || 'pending'}</strong>
+                  </Typography>
+                  
+                  {/* Simple Approval Buttons */}
+                  <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+                    <Button
+                      variant="contained"
+                      color="success"
+                      onClick={() => handleApprovalAction(selectedMaterial, 'approve')}
+                      disabled={selectedMaterial.approvalStatus === 'approved'}
+                    >
+                      Approve This Material
+                    </Button>
+                    <Button
+                      variant="contained"
+                      color="error"
+                      onClick={() => handleApprovalAction(selectedMaterial, 'reject')}
+                      disabled={selectedMaterial.approvalStatus === 'rejected'}
+                    >
+                      Reject This Material
+                    </Button>
+                  </Box>
+                  
+                  {selectedMaterial.rejectionReason && (
+                    <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+                      <strong>Rejection Reason:</strong> {selectedMaterial.rejectionReason}
+                    </Typography>
+                  )}
+                </Grid>
+              </>
+            )}
+
+            {/* Old approval section - keeping for reference */}
+            {/* Approval Status Section (only for admins editing existing materials) */}
+            {console.log('DEBUG - Edit Dialog: user role:', user?.role, 'selectedMaterial:', selectedMaterial?.name, 'approvalStatus:', selectedMaterial?.approvalStatus)}
+            {/* Temporarily showing for all users to debug */}
+            {false && selectedMaterial && (
+              <>
+                <Grid item xs={12}>
+                  <Typography variant="h6" color="primary" gutterBottom sx={{ mt: 2 }}>
+                    🔍 Approval Status (Debug Mode - User: {user?.role || 'unknown'})
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="subtitle2" color="text.secondary">Current Status</Typography>
+                  <Chip 
+                    label={selectedMaterial.approvalStatus?.toUpperCase() || 'PENDING'}
+                    color={getApprovalStatus(selectedMaterial.approvalStatus).color}
+                    sx={{ mt: 1 }}
+                  />
+                </Grid>
+                
+                {selectedMaterial.approvedBy && (
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      {selectedMaterial.approvalStatus === 'approved' ? 'Approved By' : 'Reviewed By'}
+                    </Typography>
+                    <Typography variant="body1">{selectedMaterial.approvedBy}</Typography>
+                  </Grid>
+                )}
+                
+                {selectedMaterial.approvedAt && (
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      {selectedMaterial.approvalStatus === 'approved' ? 'Approved Date' : 'Review Date'}
+                    </Typography>
+                    <Typography variant="body1">
+                      {new Date(selectedMaterial.approvedAt).toLocaleString()}
+                    </Typography>
+                  </Grid>
+                )}
+                
+                {selectedMaterial.rejectionReason && (
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle2" color="error">Rejection Reason</Typography>
+                    <Typography variant="body1" color="error">
+                      {selectedMaterial.rejectionReason}
+                    </Typography>
+                  </Grid>
+                )}
+                
+                {/* Approval Actions for Pending Materials */}
+                {selectedMaterial.approvalStatus === 'pending' && (
+                  <Grid item xs={12}>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      Debug Info: Material status is "{selectedMaterial.approvalStatus}", User role is "{user?.role}"
+                    </Typography>
+                    <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+                      <Button
+                        variant="contained"
+                        color="success"
+                        startIcon={<CheckIcon />}
+                        onClick={() => handleApprovalAction(selectedMaterial, 'approve')}
+                      >
+                        Approve Material
+                      </Button>
+                      <Button
+                        variant="contained"
+                        color="error"
+                        startIcon={<CloseIcon />}
+                        onClick={() => handleApprovalAction(selectedMaterial, 'reject')}
+                      >
+                        Reject Material
+                      </Button>
+                    </Box>
+                  </Grid>
+                )}
+              </>
+            )}
           </Grid>
         </DialogContent>
         <DialogActions>
@@ -930,6 +1344,81 @@ const Materials = () => {
                 <Typography variant="body1">{selectedMaterial.location?.bin || 'N/A'}</Typography>
               </Grid>
 
+              {/* Approval Status Section (only for admins) */}
+              {user?.role === 'admin' && (
+                <>
+                  {console.log('DEBUG: Showing approval section for admin user:', user)}
+                  {console.log('DEBUG: Selected material approval status:', selectedMaterial?.approvalStatus)}
+                  <Grid item xs={12}>
+                    <Typography variant="h6" color="primary" gutterBottom sx={{ mt: 2 }}>
+                      Approval Status
+                    </Typography>
+                  </Grid>
+                  
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="subtitle2" color="text.secondary">Current Status</Typography>
+                    <Chip 
+                      label={selectedMaterial.approvalStatus?.toUpperCase() || 'PENDING'}
+                      color={getApprovalStatus(selectedMaterial.approvalStatus).color}
+                      sx={{ mt: 1 }}
+                    />
+                  </Grid>
+                  
+                  {selectedMaterial.approvedBy && (
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        {selectedMaterial.approvalStatus === 'approved' ? 'Approved By' : 'Reviewed By'}
+                      </Typography>
+                      <Typography variant="body1">{selectedMaterial.approvedBy}</Typography>
+                    </Grid>
+                  )}
+                  
+                  {selectedMaterial.approvedAt && (
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        {selectedMaterial.approvalStatus === 'approved' ? 'Approved Date' : 'Review Date'}
+                      </Typography>
+                      <Typography variant="body1">
+                        {new Date(selectedMaterial.approvedAt).toLocaleString()}
+                      </Typography>
+                    </Grid>
+                  )}
+                  
+                  {selectedMaterial.rejectionReason && (
+                    <Grid item xs={12}>
+                      <Typography variant="subtitle2" color="error">Rejection Reason</Typography>
+                      <Typography variant="body1" color="error">
+                        {selectedMaterial.rejectionReason}
+                      </Typography>
+                    </Grid>
+                  )}
+                  
+                  {/* Approval Actions for Pending Materials */}
+                  {selectedMaterial.approvalStatus === 'pending' && (
+                    <Grid item xs={12}>
+                      <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+                        <Button
+                          variant="contained"
+                          color="success"
+                          startIcon={<CheckIcon />}
+                          onClick={() => handleApprovalAction(selectedMaterial, 'approve')}
+                        >
+                          Approve Material
+                        </Button>
+                        <Button
+                          variant="contained"
+                          color="error"
+                          startIcon={<CloseIcon />}
+                          onClick={() => handleApprovalAction(selectedMaterial, 'reject')}
+                        >
+                          Reject Material
+                        </Button>
+                      </Box>
+                    </Grid>
+                  )}
+                </>
+              )}
+
               {/* Timestamps */}
               <Grid item xs={12}>
                 <Typography variant="h6" color="primary" gutterBottom sx={{ mt: 2 }}>
@@ -984,8 +1473,68 @@ const Materials = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Approval Confirmation Dialog */}
+      <Dialog open={openApprovalDialog} onClose={() => setOpenApprovalDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          {approvalAction === 'approve' ? 'Approve Material' : 'Reject Material'}
+        </DialogTitle>
+        <DialogContent>
+          <Typography sx={{ mb: 2 }}>
+            Are you sure you want to {approvalAction} the material "{materialForApproval?.name}"?
+          </Typography>
+          
+          {/* Show rejection reason field for reject action */}
+          {approvalAction === 'reject' && (
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Please provide a reason for rejection:
+              </Typography>
+              <TextField
+                fullWidth
+                multiline
+                rows={3}
+                label="Rejection Reason *"
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="Enter the reason for rejecting this material..."
+                required
+                error={!rejectionReason.trim()}
+                helperText={!rejectionReason.trim() ? 'Rejection reason is required' : ''}
+                variant="outlined"
+                sx={{ mb: 2 }}
+              />
+            </Box>
+          )}
+          
+          {/* Show information for approve action */}
+          {approvalAction === 'approve' && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+              Approved materials will be available for use in the system.
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setOpenApprovalDialog(false);
+            setRejectionReason('');
+            setApprovalAction('');
+            setMaterialForApproval(null);
+          }}>
+            Cancel
+          </Button>
+          <Button 
+            variant="contained" 
+            color={approvalAction === 'approve' ? 'success' : 'error'} 
+            onClick={confirmApprovalAction}
+            disabled={approvalAction === 'reject' && !rejectionReason.trim()}
+          >
+            {approvalAction === 'approve' ? 'Approve' : 'Reject'} Material
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
 
-export default Materials;
+export default MaterialManagement;
