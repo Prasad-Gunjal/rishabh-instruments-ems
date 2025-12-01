@@ -33,6 +33,7 @@ router.get('/', auth, async (req, res) => {
     const materials = await Material.find(query)
       .populate('createdBy', 'name email')
       .populate('updatedBy', 'name email')
+      .populate('approvedBy', 'name email')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
