@@ -1404,7 +1404,7 @@ const MaterialManagement = () => {
                       <Typography variant="subtitle2" color="text.secondary">
                         {selectedMaterial.approvalStatus === 'approved' ? 'Approved By' : 'Reviewed By'}
                       </Typography>
-                      <Typography variant="body1">{selectedMaterial.approvedBy}</Typography>
+                      <Typography variant="body1">{selectedMaterial.approvedBy?.name || selectedMaterial.approvedBy}</Typography>
                     </Grid>
                   )}
                   
