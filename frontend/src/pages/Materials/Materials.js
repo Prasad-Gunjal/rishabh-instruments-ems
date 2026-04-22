@@ -297,7 +297,6 @@ const MaterialManagement = () => {
 
   const handleSubmit = async () => {
     try {
-      console.log('Form submission started', formData);
       setDialogError(''); // Clear any previous dialog errors
       
       // Validation for required fields
@@ -380,17 +379,11 @@ const MaterialManagement = () => {
         approvalStatus: user?.role === 'admin' ? 'approved' : 'pending',
       };
 
-      console.log('Submit data prepared:', submitData);
-
       if (selectedMaterial) {
-        console.log('Updating material:', selectedMaterial._id);
-        const response = await apiService.updateMaterial(selectedMaterial._id, submitData);
-        console.log('Update response:', response);
+        await apiService.updateMaterial(selectedMaterial._id, submitData);
         setError('');
       } else {
-        console.log('Creating new material');
-        const response = await apiService.createMaterial(submitData);
-        console.log('Create response:', response);
+        await apiService.createMaterial(submitData);
         setError('');
         
         // Show appropriate success message based on user role
@@ -401,7 +394,6 @@ const MaterialManagement = () => {
         }
       }
       
-      console.log('Fetching updated materials list');
       await fetchMaterials();
       handleCloseDialog();
     } catch (error) {
@@ -1061,6 +1053,52 @@ const MaterialManagement = () => {
               />
             </Grid>
 
+            {/* Show rejection reason to all users if material was rejected */}
+            {selectedMaterial && selectedMaterial.approvalStatus === 'rejected' && selectedMaterial.rejectionReason && (
+              <>
+                <Grid item xs={12}>
+                  <Alert severity="error" icon={<CloseIcon />} sx={{ mt: 2 }}>
+                    <Typography variant="subtitle1" fontWeight={700} color="error" gutterBottom>
+                      ⚠️ Material Rejected
+                    </Typography>
+                    <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(211, 47, 47, 0.05)', borderRadius: 1, border: '1px solid rgba(211, 47, 47, 0.2)' }}>
+                      <Typography variant="body2" fontWeight={600} gutterBottom>
+                        Rejection Reason:
+                      </Typography>
+                      <Typography variant="body1" sx={{ mb: 2, fontStyle: 'italic' }}>
+                        "{selectedMaterial.rejectionReason}"
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', mt: 2, pt: 2, borderTop: '1px solid rgba(0,0,0,0.1)' }}>
+                        {selectedMaterial.approvedBy && (
+                          <Box>
+                            <Typography variant="caption" color="text.secondary" display="block">
+                              Rejected by
+                            </Typography>
+                            <Typography variant="body2" fontWeight={600}>
+                              {selectedMaterial.approvedBy?.name || selectedMaterial.approvedBy}
+                            </Typography>
+                          </Box>
+                        )}
+                        {selectedMaterial.approvedAt && (
+                          <Box>
+                            <Typography variant="caption" color="text.secondary" display="block">
+                              Date & Time
+                            </Typography>
+                            <Typography variant="body2" fontWeight={600}>
+                              {new Date(selectedMaterial.approvedAt).toLocaleString('en-IN', { 
+                                dateStyle: 'medium', 
+                                timeStyle: 'short' 
+                              })}
+                            </Typography>
+                          </Box>
+                        )}
+                      </Box>
+                    </Box>
+                  </Alert>
+                </Grid>
+              </>
+            )}
+
             {/* Admin Approval Control - Simple Buttons Only */}
             {user?.role === 'admin' && selectedMaterial && (
               <>
@@ -1106,7 +1144,6 @@ const MaterialManagement = () => {
 
             {/* Old approval section - keeping for reference */}
             {/* Approval Status Section (only for admins editing existing materials) */}
-            {console.log('DEBUG - Edit Dialog: user role:', user?.role, 'selectedMaterial:', selectedMaterial?.name, 'approvalStatus:', selectedMaterial?.approvalStatus)}
             {/* Temporarily showing for all users to debug */}
             {false && selectedMaterial && (
               <>
@@ -1347,8 +1384,6 @@ const MaterialManagement = () => {
               {/* Approval Status Section (only for admins) */}
               {user?.role === 'admin' && (
                 <>
-                  {console.log('DEBUG: Showing approval section for admin user:', user)}
-                  {console.log('DEBUG: Selected material approval status:', selectedMaterial?.approvalStatus)}
                   <Grid item xs={12}>
                     <Typography variant="h6" color="primary" gutterBottom sx={{ mt: 2 }}>
                       Approval Status
@@ -1369,7 +1404,7 @@ const MaterialManagement = () => {
                       <Typography variant="subtitle2" color="text.secondary">
                         {selectedMaterial.approvalStatus === 'approved' ? 'Approved By' : 'Reviewed By'}
                       </Typography>
-                      <Typography variant="body1">{selectedMaterial.approvedBy}</Typography>
+                      <Typography variant="body1">{selectedMaterial.approvedBy?.name || selectedMaterial.approvedBy}</Typography>
                     </Grid>
                   )}
                   
@@ -1439,6 +1474,41 @@ const MaterialManagement = () => {
                   {selectedMaterial.updatedAt ? new Date(selectedMaterial.updatedAt).toLocaleString() : 'N/A'}
                 </Typography>
               </Grid>
+
+              {/* Show rejection reason to all users if material was rejected */}
+              {selectedMaterial.approvalStatus === 'rejected' && selectedMaterial.rejectionReason && (
+                <>
+                  <Grid item xs={12}>
+                    <Typography variant="h6" color="error" gutterBottom sx={{ mt: 2 }}>
+                      Rejection Information
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Box sx={{ 
+                      p: 2, 
+                      bgcolor: 'rgba(211, 47, 47, 0.05)', 
+                      borderRadius: 1, 
+                      border: '1px solid rgba(211, 47, 47, 0.2)' 
+                    }}>
+                      <Typography variant="body2" color="error" sx={{ mb: 1 }}>
+                        <strong>Rejection Reason:</strong> {selectedMaterial.rejectionReason}
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                        {selectedMaterial.approvedBy && (
+                          <Typography variant="body2" color="text.secondary">
+                            <strong>Rejected By:</strong> {selectedMaterial.approvedBy?.name || selectedMaterial.approvedBy}
+                          </Typography>
+                        )}
+                        {selectedMaterial.approvedAt && (
+                          <Typography variant="body2" color="text.secondary">
+                            <strong>Date:</strong> {new Date(selectedMaterial.approvedAt).toLocaleString()}
+                          </Typography>
+                        )}
+                      </Box>
+                    </Box>
+                  </Grid>
+                </>
+              )}
             </Grid>
           )}
         </DialogContent>
